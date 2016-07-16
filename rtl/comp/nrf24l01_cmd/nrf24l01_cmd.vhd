@@ -50,7 +50,7 @@ entity NRF24L01_CMD is
         CMD        : in  std_logic_vector(7 downto 0); -- input command
         DIN        : in  std_logic_vector(255 downto 0); -- input data
         DIN_EN     : in  std_logic; -- when DIN_EN = 1, input data will be used
-        DIN_LNG    : in  std_logic_vector(4 downto 0); -- input data long in bytes (1B to 32B)
+        DIN_LNG    : in  std_logic_vector(5 downto 0); -- input data long in bytes (0B to 32B)
         VALID      : in  std_logic; -- when VALID = 1, DIN, DIN_EN, DIN_LNG and CMD are valid and can be accept
         READY      : out std_logic; -- when READY = 1, NRF24L01_CMD is ready to accept next command and data
         STATUS     : out std_logic_vector(7 downto 0); -- status data
@@ -71,9 +71,10 @@ architecture FULL of NRF24L01_CMD is
     signal cmd_reg          : std_logic_vector(7 downto 0);
     signal data_reg         : std_logic_vector(255 downto 0);
     signal data_en_reg      : std_logic;
-    signal data_lng_reg     : std_logic_vector(4 downto 0);
+    signal data_lng_reg     : std_logic_vector(5 downto 0);
+    signal data_byte        : std_logic_vector(7 downto 0);
 
-    signal byte_cnt         : unsigned(4 downto 0);
+    signal byte_cnt         : unsigned(5 downto 0);
     signal byte_num         : integer;
     signal byte_cnt_max     : std_logic;
     signal byte_cnt_en      : std_logic;
@@ -96,7 +97,7 @@ begin
     STATUS        <= spi_dout;
     STATUS_VLD    <= status_vld_sig;
     DOUT          <= dout_reg;
-    byte_cnt_tick <= spi_ready;
+    byte_cnt_tick <= spi_dout_vld;
     byte_num      <= to_integer(byte_cnt);
     dout_reg_en   <= dout_vld_sig;
 
@@ -128,7 +129,7 @@ begin
     byte_cnt_reg_p : process (CLK)
     begin
         if (rising_edge(CLK)) then
-            if (RST = '1') then
+            if (RST = '1' OR byte_cnt_en = '0') then
                 byte_cnt <= (others => '0');
             elsif (byte_cnt_en = '1' AND byte_cnt_tick = '1') then
                 if (byte_cnt = unsigned(data_lng_reg)) then
@@ -152,6 +153,20 @@ begin
     end process;
 
     -- -------------------------------------------------------------------------
+    -- DATA BYTE LOGIC
+    -- -------------------------------------------------------------------------
+
+    data_byte_p : process (data_reg, byte_num)
+    begin
+        data_byte <= (others => '0');
+        data_byte_for : for i in 0 to 31 loop
+            if ((byte_num-1) = i) then
+                data_byte <= data_reg((8*i)+7 downto (8*i));
+            end if;
+        end loop;
+    end process;
+
+    -- -------------------------------------------------------------------------
     -- OUTPUT DATA LOGIC AND REGISTER
     -- -------------------------------------------------------------------------
 
@@ -159,7 +174,11 @@ begin
     begin
         if (byte_cnt_en = '1') then
             dout_comb <= dout_reg;
-            dout_comb((8*byte_num)+15 downto (8*byte_num)+8) <= spi_dout;
+            dout_comb_for : for i in 0 to 31 loop
+                if ((byte_num-1) = i) then
+                    dout_comb((8*i)+7 downto (8*i)) <= spi_dout;
+                end if;
+            end loop;
         else
             dout_comb <= dout_reg;
             dout_comb(255 downto 248) <= spi_dout;
@@ -169,7 +188,9 @@ begin
     dout_reg_p : process (CLK)
     begin
         if (rising_edge(CLK)) then
-            if (dout_reg_en = '1') then
+            if (RST = '1') then
+                dout_reg <= (others => '0');
+            elsif (dout_reg_en = '1') then
                 dout_reg <= dout_comb;
             end if;
         end if;
@@ -204,7 +225,7 @@ begin
 
     -- NEXT STATE AND OUTPUTS LOGIC
     process (present_state, VALID, cmd_reg, data_en_reg, spi_dout_vld,
-             spi_ready, data_reg, byte_cnt_max, byte_num)
+             spi_ready, data_byte, byte_cnt_max)
     begin
 
         case present_state is
@@ -242,7 +263,7 @@ begin
                 spi_din_vld    <= '0';
                 ready_sig      <= '0';
                 status_vld_sig <= spi_dout_vld;
-                byte_cnt_en    <= '0';
+                byte_cnt_en    <= '1';
                 dout_vld_sig   <= '0';
 
                 if (spi_dout_vld = '1' AND data_en_reg = '1') then
@@ -254,7 +275,7 @@ begin
                 end if;
 
             when data =>
-                spi_din        <= data_reg((8*byte_num)+7 downto (8*byte_num));
+                spi_din        <= data_byte;
                 spi_din_vld    <= '1';
                 ready_sig      <= '0';
                 status_vld_sig <= '0';
