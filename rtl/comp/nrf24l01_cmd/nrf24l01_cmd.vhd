@@ -99,7 +99,7 @@ begin
     DOUT          <= dout_reg;
     byte_cnt_tick <= spi_dout_vld;
     byte_num      <= to_integer(byte_cnt);
-    dout_reg_en   <= dout_vld_sig;
+    dout_reg_en   <= spi_dout_vld;
 
     -- -------------------------------------------------------------------------
     -- INPUT REGISTERS
@@ -170,7 +170,7 @@ begin
     -- OUTPUT DATA LOGIC AND REGISTER
     -- -------------------------------------------------------------------------
 
-    dout_comb_p : process (byte_cnt_en, dout_reg, byte_num, spi_dout)
+    dout_comb_p : process (byte_cnt_en, dout_reg, byte_num, data_lng_reg, spi_dout)
     begin
         if (byte_cnt_en = '1') then
             dout_comb <= dout_reg;
@@ -181,14 +181,18 @@ begin
             end loop;
         else
             dout_comb <= dout_reg;
-            dout_comb(255 downto 248) <= spi_dout;
+            dout_comb_for2 : for i in 0 to 31 loop
+                if ((to_integer(unsigned(data_lng_reg)-1)) = i) then
+                    dout_comb((8*i)+7 downto (8*i)) <= spi_dout;
+                end if;
+            end loop;
         end if;
     end process;
 
     dout_reg_p : process (CLK)
     begin
         if (rising_edge(CLK)) then
-            if (RST = '1') then
+            if (RST = '1' OR status_vld_sig = '1') then
                 dout_reg <= (others => '0');
             elsif (dout_reg_en = '1') then
                 dout_reg <= dout_comb;
