@@ -50,7 +50,7 @@ entity NRF24L01_CMD is
         CMD        : in  std_logic_vector(7 downto 0); -- input command
         DIN        : in  std_logic_vector(255 downto 0); -- input data
         DIN_EN     : in  std_logic; -- when DIN_EN = 1, input data will be used
-        DIN_LNG    : in  std_logic_vector(5 downto 0); -- input data long in bytes (1B to 32B)
+        DIN_LNG    : in  std_logic_vector(4 downto 0); -- input data long in bytes (1B to 32B)
         VALID      : in  std_logic; -- when VALID = 1, DIN, DIN_EN, DIN_LNG and CMD are valid and can be accept
         READY      : out std_logic; -- when READY = 1, NRF24L01_CMD is ready to accept next command and data
         STATUS     : out std_logic_vector(7 downto 0); -- status data
@@ -71,9 +71,9 @@ architecture FULL of NRF24L01_CMD is
     signal cmd_reg          : std_logic_vector(7 downto 0);
     signal data_reg         : std_logic_vector(255 downto 0);
     signal data_en_reg      : std_logic;
-    signal data_lng_reg     : std_logic_vector(5 downto 0);
+    signal data_lng_reg     : std_logic_vector(4 downto 0);
 
-    signal byte_cnt         : unsigned(5 downto 0);
+    signal byte_cnt         : unsigned(4 downto 0);
     signal byte_num         : integer;
     signal byte_cnt_max     : std_logic;
     signal byte_cnt_en      : std_logic;
