@@ -49,19 +49,21 @@ entity NRF24L01 is
         RF_POWER         : std_logic_vector(1 downto 0) := "11"
     );
     Port (
-        CLK      : in  std_logic; -- system clock
-        RST      : in  std_logic; -- high active synchronous reset
+        CLK       : in  std_logic; -- system clock
+        RST       : in  std_logic; -- high active synchronous reset
         -- SPI MASTER INTERFACE
-        SCLK     : out std_logic;
-        CS_N     : out std_logic;
-        MOSI     : out std_logic;
-        MISO     : in  std_logic;
+        SCLK      : out std_logic;
+        CS_N      : out std_logic;
+        MOSI      : out std_logic;
+        MISO      : in  std_logic;
         -- NRF24L01 INTERFACE
-        RF_IRQ   : in  std_logic;
-        RF_CE    : out std_logic;
+        RF_IRQ    : in  std_logic;
+        RF_CE     : out std_logic;
+        -- CONTROL INTERFACE
+        STATUS_RD : in  std_logic; -- for debug
         -- USER DATA INTERFACE
-        DOUT     : out std_logic_vector(255 downto 0); -- output data
-        DOUT_VLD : out std_logic -- when DOUT_VLD = 1, output data are valid
+        DOUT      : out std_logic_vector(255 downto 0); -- output data
+        DOUT_VLD  : out std_logic -- when DOUT_VLD = 1, output data are valid
     );
 end NRF24L01;
 
@@ -75,7 +77,7 @@ architecture FULL of NRF24L01 is
     signal cmod_cmd          : std_logic_vector(7 downto 0);
     signal cmod_din          : std_logic_vector(255 downto 0);
     signal cmod_din_en       : std_logic;
-    signal cmod_din_lng      : std_logic_vector(4 downto 0);
+    signal cmod_din_lng      : std_logic_vector(5 downto 0);
     signal cmod_valid        : std_logic;
     signal cmod_ready        : std_logic;
     signal cmod_status       : std_logic_vector(7 downto 0);
@@ -85,12 +87,11 @@ architecture FULL of NRF24L01 is
 
     signal rf_ce_sig         : std_logic;
     signal dout_reg          : std_logic_vector(255 downto 0);
+    signal status_reg        : std_logic_vector(7 downto 0);
     signal dout_vld_reg      : std_logic;
 
-    signal config_reg        : std_logic_vector(255 downto 0);
-
     type state is (idle, set_config, wait_1500, set_channel, set_setup,
-                   set_rx_addr_p0, set_rx_pw_p0, wait_130, rx_mode, read_data);
+                   set_rx_addr_p0, set_rx_pw_p0, wait_130, rx_mode, read_data, wait_data_vld);
     signal present_state, next_state : state;
 
 begin
@@ -132,10 +133,25 @@ begin
     wait_1500_cnt_max_reg_p : process (CLK)
     begin
         if (rising_edge(CLK)) then
-            if (wait_cnt = "11111111111111111") then
+            if (wait_cnt = "10011100010000000") then
                 wait_1500_cnt_max <= '1';
             else
                 wait_1500_cnt_max <= '0';
+            end if;
+        end if;
+    end process;
+
+    -- -------------------------------------------------------------------------
+    -- STATUS REGISTER
+    -- -------------------------------------------------------------------------
+
+    status_reg_p : process (CLK)
+    begin
+        if (rising_edge(CLK)) then
+            if (RST = '1') then
+                status_reg <= (others => '0');
+            elsif (cmod_status_vld = '1') then
+                status_reg <= cmod_status;
             end if;
         end if;
     end process;
@@ -147,7 +163,12 @@ begin
     dout_reg_p : process (CLK)
     begin
         if (rising_edge(CLK)) then
-            dout_reg <= cmod_dout;
+            if (STATUS_RD = '1') then
+                dout_reg <= (others => '0');
+                dout_reg(7 downto 0) <= status_reg;
+            else
+                dout_reg <= cmod_dout;
+            end if;
         end if;
     end process;
 
@@ -157,7 +178,7 @@ begin
             if (RST = '1') then
                 dout_vld_reg <= '0';
             else
-                dout_vld_reg <= cmod_dout_vld AND rf_ce_sig;
+                dout_vld_reg <= (cmod_dout_vld AND rf_ce_sig) OR STATUS_RD;
             end if;
         end if;
     end process;
@@ -179,7 +200,7 @@ begin
     end process;
 
     -- NEXT STATE AND OUTPUTS LOGIC
-    process (present_state, cmod_ready, wait_1500_cnt_max, wait_130_cnt_max, RF_IRQ)
+    process (present_state, cmod_ready, wait_1500_cnt_max, wait_130_cnt_max, RF_IRQ, cmod_dout_vld)
     begin
 
         case present_state is
@@ -203,7 +224,7 @@ begin
                 cmod_cmd     <= "00100000"; -- write to control register
                 cmod_din     <= (255 downto 4 => '0') & RF_CRC_EN & RF_CRC_LENGHT & "11";
                 cmod_din_en  <= '1';
-                cmod_din_lng <= "00000";
+                cmod_din_lng <= "000001";
                 cmod_valid   <= '1';
                 wait_cnt_en  <= '0';
                 rf_ce_sig    <= '0';
@@ -233,7 +254,7 @@ begin
                 cmod_cmd     <= "00100101"; -- write to channel register
                 cmod_din     <= (255 downto 7 => '0') & RF_CHANNEL; -- write channel
                 cmod_din_en  <= '1';
-                cmod_din_lng <= "00000";
+                cmod_din_lng <= "000001";
                 cmod_valid   <= '1';
                 wait_cnt_en  <= '0';
                 rf_ce_sig    <= '0';
@@ -248,7 +269,7 @@ begin
                 cmod_cmd     <= "00100110"; -- write to setup register
                 cmod_din     <= (255 downto 6 => '0') & RF_DATA_RATE(1) & '0' & RF_DATA_RATE(0) & RF_POWER & '0';
                 cmod_din_en  <= '1';
-                cmod_din_lng <= "00000";
+                cmod_din_lng <= "000001";
                 cmod_valid   <= '1';
                 wait_cnt_en  <= '0';
                 rf_ce_sig    <= '0';
@@ -263,7 +284,7 @@ begin
                 cmod_cmd     <= "00101010"; -- write to rx addr pipe0 register
                 cmod_din     <= (255 downto 40 => '0') & RF_RX_PIPE0_ADDR;
                 cmod_din_en  <= '1';
-                cmod_din_lng <= "00100";
+                cmod_din_lng <= "000101";
                 cmod_valid   <= '1';
                 wait_cnt_en  <= '0';
                 rf_ce_sig    <= '0';
@@ -278,7 +299,7 @@ begin
                 cmod_cmd     <= "00110001"; -- write to rx payload width pipe0 register
                 cmod_din     <= (255 downto 6 => '0') & std_logic_vector(to_unsigned(RF_PAYLOAD_WIDTH,6));
                 cmod_din_en  <= '1';
-                cmod_din_lng <= "00000";
+                cmod_din_lng <= "000001";
                 cmod_valid   <= '1';
                 wait_cnt_en  <= '0';
                 rf_ce_sig    <= '0';
@@ -323,15 +344,30 @@ begin
                 cmod_cmd     <= "01100001"; -- read rx data
                 cmod_din     <= (others => '0');
                 cmod_din_en  <= '1';
-                cmod_din_lng <= "11111";
+                cmod_din_lng <= "100000";
                 cmod_valid   <= '1';
                 wait_cnt_en  <= '0';
                 rf_ce_sig    <= '1';
 
                 if (cmod_ready = '1') then
-                    next_state <= rx_mode;
+                    next_state <= wait_data_vld;
                 else
                     next_state <= read_data;
+                end if;
+
+            when wait_data_vld =>
+                cmod_cmd     <= (others => '0');
+                cmod_din     <= (others => '0');
+                cmod_din_en  <= '0';
+                cmod_din_lng <= (others => '0');
+                cmod_valid   <= '0';
+                wait_cnt_en  <= '0';
+                rf_ce_sig    <= '1';
+
+                if (cmod_dout_vld = '1') then
+                    next_state <= rx_mode;
+                else
+                    next_state <= wait_data_vld;
                 end if;
 
             when others =>
